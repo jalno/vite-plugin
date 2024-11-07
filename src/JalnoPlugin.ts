@@ -54,7 +54,7 @@ export interface PluginConfig {
 
     /**
      * The extension of stylesheet file of each theme.
-     *vite-plugin
+     *
      * @default 'js'
      */
     outputScriptFileExtension?: string,
