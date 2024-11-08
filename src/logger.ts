@@ -1,6 +1,8 @@
 import { createLogger, LogOptions } from "vite";
+import pc from "picocolors";
+import { version } from "../package.json";
 
-const prefix = '[@jalno/vite-plugin] ';
+const prefix = pc.cyan(`[@jalno/vite-plugin][v${version}] `);
 
 /**
  * Passing prefix does not work without any reason.
