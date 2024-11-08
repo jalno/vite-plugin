@@ -1,16 +1,24 @@
 {
     "compilerOptions": {
-        "outDir": "./dist",
         "target": "ES2020",
-        "module": "preserve",
+        "module": "ESNext",
         "moduleResolution": "bundler",
-        "outFile": "dist/index.js",
-        "resolveJsonModule": true,
         "strict": true,
+        "outDir": "./dist",
         "declaration": true,
-        "esModuleInterop": true
+        "declarationDir": "./dist",
+        "noEmitOnError": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "resolveJsonModule": true,
+        "allowJs": true,
+        "forceConsistentCasingInFileNames": true
     },
     "include": [
-        "./src/index.ts"
+        "./src/**/*.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
     ]
 }
