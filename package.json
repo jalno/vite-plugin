@@ -1,6 +1,6 @@
 {
     "name": "@jalno/vite-plugin",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "description": "Jalno plugin for Vite.",
     "keywords": [
         "laravel",
