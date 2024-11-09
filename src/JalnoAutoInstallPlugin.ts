@@ -198,7 +198,10 @@ export default class JalnoAutoInstallPlugin {
         const packageName = frontend.getNpmLikeName();
 
         if (content?.name !== packageName) {
-            content.name = packageName;
+            content = {
+                name: packageName,
+                ...content,
+            };
             await fs.writeFile(packageFile, JSON.stringify(content, undefined, "\t"));
         }
 
