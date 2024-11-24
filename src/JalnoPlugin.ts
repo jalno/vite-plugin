@@ -8,7 +8,30 @@ import fs from "fs/promises";
 import logger from './logger';
 import Packages from './Jalno/Packages';
 
-export interface PluginConfig {
+export type TranslationConfig = {
+    /**
+     * The format of translator phrases format.
+     * You can use '[code]' variable in the format for language code.
+     * @default 'translator-[code].[outputScriptFileExtension]'
+     * @example `translator-fa.js`
+     * @example `translator-en.js`
+     * @example `translator-en_US.js`
+     */
+    translatorFileNameFormat?: string,
+
+    /**
+     * The format of translator phrases format.
+     * You can use '[code]' variable in the format for language code.
+     *
+     * @default '[theme]-translator-[code].[outputScriptFileExtension]'
+     * @example `clipone-translator-fa.js`
+     * @example `apital-translator-en.js`
+     * @example `apital-translator-en_US.js`
+     */
+    themeTranslatorFileNameFormat?: string,
+};
+
+export interface GeneralPluginConfiguration<Translation> {
     /**
      * Laravel's public directory.
      * @note This config is only applied if not applied by `laravel-vite-plugin` before.
@@ -75,13 +98,17 @@ export interface PluginConfig {
     scriptAssetsType?: string | string[],
 
     /**
-     * The format of translator phrases format.
-     * You can use '[code]' variable in the format for language code.
-     *
-     * @default 'translator-[code].[outputScriptFileExtension]'
+     * Configure of translation files.
+     * The output files is used by `@jalno/translator` package.
      */
-    translatorFilesNamesFormat?: string,
+    translation?: Translation,
 }
+
+export interface PluginConfig extends GeneralPluginConfiguration<TranslationConfig> {
+
+};
+
+type RequiredPluginConfig = Required<GeneralPluginConfiguration<Required<TranslationConfig>>>;
 
 export default class JalnoPlugin {
     /**
@@ -90,7 +117,7 @@ export default class JalnoPlugin {
      *  You can achive fullfiled configuration using `JalnoPlugin.resolveConfig(config: PluginConfig)` method.
      * @returns Just another plugin for vite.
      */
-    public static resolve(pluginConfig: Required<PluginConfig>): Plugin {
+    public static resolve(pluginConfig: RequiredPluginConfig): Plugin {
         return {
             name: 'jalno',
             enforce: 'post',
@@ -155,7 +182,7 @@ export default class JalnoPlugin {
      * @param config The user given configuration.
      * @returns The validated and fullfiled configuration for plugin.
      */
-    public static resolveConfig(config: PluginConfig): Required<PluginConfig> {
+    public static resolveConfig(config: PluginConfig): RequiredPluginConfig {
         if (typeof config === 'undefined') {
             throw new Error('[@jalno/vite-plugin][JalnoPlugin]: missing configuration.');
         }
@@ -241,15 +268,20 @@ export default class JalnoPlugin {
             styleAssetsType: config.styleAssetsType ?? ['css', 'less', 'scss'],
             scriptAssetsType: config.scriptAssetsType ?? ['js', 'jsx', 'ts', 'tsx'],
 
-            translatorFilesNamesFormat: config.translatorFilesNamesFormat ?? `translator-[code].${config.outputScriptFileExtension ?? 'js'}`,
+            translation: {
+                translatorFileNameFormat: `translator-[code].${config.outputScriptFileExtension ?? 'js'}`,
+                themeTranslatorFileNameFormat: `[theme]-translator-[code].${config.outputScriptFileExtension ?? 'js'}`,
+
+                ...(config?.translation ?? {}),
+            },
         };
     }
 
-    protected static resolveBase(pluginConfig: Required<PluginConfig>, assetUrl: string): string {
+    protected static resolveBase(pluginConfig: RequiredPluginConfig, assetUrl: string): string {
         return assetUrl + (! assetUrl.endsWith('/') ? '/' : '') + pluginConfig.buildDirectory + '/';
     }
 
-    protected static async resolveInput(pluginConfig: Required<PluginConfig>, config: UserConfig): Promise<InputOption> {
+    protected static async resolveInput(pluginConfig: RequiredPluginConfig, config: UserConfig): Promise<InputOption> {
         const input: InputOption = [];
 
         if (typeof config.build?.rollupOptions?.input === 'string') {
@@ -284,29 +316,44 @@ export default class JalnoPlugin {
         return input;
     }
 
-    protected static async generateLanguageFiles(config: Required<PluginConfig>): Promise<string[]> {
+    protected static async generateLanguageFiles(config: RequiredPluginConfig): Promise<string[]> {
         type TranslatorItem = {
-            source: `${string}-package` | `${string}-frontend`,
+            source: {
+                name: string,
+                type: 'package'|'frontend'
+            },
             phrases: Record<string, string>,
             rtl: boolean,
         };
-        const translator: Record<string, TranslatorItem[]> = {};
+        const packagesPhrases: Record<string, TranslatorItem[]> = {};
+        const themesPhrases: {
+            [theme: string] : {
+                [lang: string]: TranslatorItem[],
+            },
+        } = {};
 
         for (const p of await Packages.getInstance().all()) {
             for (const language of p.languages) {
-                translator[language.code] = translator[language.code] || [];
-                translator[language.code].push({
-                    source: `${p.name}-package`,
+                packagesPhrases[language.code] = packagesPhrases[language.code] || [];
+                packagesPhrases[language.code].push({
+                    source: {
+                        type: 'package',
+                        name: p.name,
+                    },
                     rtl: language.isRtl,
                     phrases: language.phrases,
                 });
             }
 
             for (const f of p.frontends) {
+                themesPhrases[f.name] = themesPhrases[f.name] || {};
                 for (const language of f.languages) {
-                    translator[language.code] = translator[language.code] || [];
-                    translator[language.code].push({
-                        source: `${f.name}-frontend`,
+                    themesPhrases[f.name][language.code] = themesPhrases[f.name][language.code] || [];
+                    themesPhrases[f.name][language.code].push({
+                        source: {
+                            name: f.getNpmLikeName(),
+                            type: 'frontend',
+                        },
                         rtl: language.isRtl,
                         phrases: language.phrases,
                     });
@@ -314,21 +361,25 @@ export default class JalnoPlugin {
             }
         }
 
-        const builder = async (code: string, items: TranslatorItem[]) => {
+        const builder = async (code: string, items: TranslatorItem[], file: string) => {
             const content = "// This file is generated by @jalno/vite-plugin, DO NOT EDIT IT MANUALLY!\n\n"
                 + ";window.jalno = window.jalno || {};\n"
                 + "window.jalno.translator = window.jalno.translator || {};\n"
                 + `window.jalno.translator['${code}'] = window.jalno.translator['${code}'] || [];\n\n`
                 + items
                     .map(
-                        (item) => `window.jalno.translator.${code}.push(${JSON.stringify(item, null, 2)});`
+                        (item) => `// Using '${item.source.name}' ${item.source.type}.\n`
+                            +`window.jalno.translator.${code}.push(${JSON.stringify({
+                                rtl: item.rtl,
+                                phrases: item.phrases,
+                            }, null, 2)});`
                     )
                     .join("\n\n")
                 + "\n";
 
             await fs.mkdir(config.scriptsDirectory, { recursive: true });
 
-            const fileToWrite = path.join(config.scriptsDirectory, config.translatorFilesNamesFormat.replace('[code]', code));
+            const fileToWrite = path.join(config.scriptsDirectory, file);
             logger.info(`Write ${pc.bold('translator')} file for language code '${pc.italic(code)}' into: ${pc.green(fileToWrite)}`);
             await fs.writeFile(fileToWrite, content);
 
@@ -336,8 +387,21 @@ export default class JalnoPlugin {
         };
 
         const files: Promise<string>[] = [];
-        for (const code in translator) {
-            files.push(builder(code, translator[code]));
+        for (const code in packagesPhrases) {
+            files.push(builder(
+                code,
+                packagesPhrases[code],
+                config.translation.translatorFileNameFormat.replace('[code]', code)
+            ));
+        }
+        for (const theme in themesPhrases) {
+            for (const code in themesPhrases[theme]) {
+                files.push(builder(
+                    code,
+                    themesPhrases[theme][code],
+                    config.translation.themeTranslatorFileNameFormat.replace('[theme]', theme).replace('[code]', code)
+                ));
+            }
         }
 
         return await Promise.all(files);
@@ -350,7 +414,7 @@ export default class JalnoPlugin {
      *
      * @returns Path of compiled files.
      */
-    protected static async generateStyleFiles(config: Required<PluginConfig>) {
+    protected static async generateStyleFiles(config: RequiredPluginConfig) {
         return this.generateCompiledFiles(config, 'style');
     }
 
@@ -361,7 +425,7 @@ export default class JalnoPlugin {
      *
      * @returns Path of compiled files.
      */
-    protected static async generateScriptFiles(config: Required<PluginConfig>) {
+    protected static async generateScriptFiles(config: RequiredPluginConfig) {
         return this.generateCompiledFiles(config, 'script');
     }
 
@@ -373,7 +437,7 @@ export default class JalnoPlugin {
      * @param type `style` or `script`
      * @returns The compiled files for each theme.
      */
-    protected static async generateCompiledFiles(config: Required<PluginConfig>, type: 'style'|'script') {
+    protected static async generateCompiledFiles(config: RequiredPluginConfig, type: 'style'|'script') {
         const getDate = () => {
             return (new Date).toISOString();
         }

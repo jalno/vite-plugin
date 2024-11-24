@@ -76,11 +76,11 @@ export default class JalnoLegacyPresetPlugin {
     }
 
     protected static resolveAliases(config: UserConfig, pluginConfig: Required<PluginConfig>) {
-        const defaultAliases = JalnoLegacyPresetPlugin.resolveDefaultAliases();
-
         if (!pluginConfig.configureDefaultAliases) {
             return config.resolve?.alias;
         }
+
+        const defaultAliases = JalnoLegacyPresetPlugin.resolveDefaultAliases();
 
         if (Array.isArray(config.resolve?.alias)) {
             return [
